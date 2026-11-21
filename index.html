@@ -30,7 +30,7 @@
     --c-wall: #1c2a48;
     --note-bg: #fffdf2;
     --font: system-ui, -apple-system, 'Segoe UI', sans-serif;
-    --font-display: system-ui, sans-serif;
+    --font-display: 'Space Grotesk', system-ui, sans-serif;
   }
   @media (prefers-color-scheme: dark) {
     :root:not([data-theme="light"]) {
@@ -126,6 +126,14 @@
   .h[data-h="ne"], .h[data-h="sw"] { cursor: nesw-resize; }
   .h[data-h="p1"], .h[data-h="p2"], .h[data-h="target"] { cursor: move; }
   .draft { opacity: .6; pointer-events: none; }
+  svg[data-tool="place"] .it .shape { cursor: pointer; }
+  svg[data-tool="place"] .it .hit { cursor: pointer; }
+  .it.target .shape { stroke: var(--accent); stroke-width: 3.2; }
+  .now { border: 1px solid var(--accent); border-radius: 10px; padding: 8px 10px; background: var(--paper); display: flex; flex-direction: column; gap: 3px; }
+  .now b { font-size: 1.05rem; }
+  .now small { color: var(--muted); }
+  .now.empty { border-color: var(--line); color: var(--muted); }
+  .pmsg { font-size: .85rem; color: var(--ink); min-height: 1.2em; }
 
   aside {
     flex: 0 0 310px; max-width: 100%; background: var(--panel); border: 1px solid var(--line); border-radius: 10px;
@@ -176,6 +184,7 @@
   <button data-tool="line" title="Wand oder Linie ziehen (L)">Wand / Linie <kbd>L</kbd></button>
   <button data-tool="text" title="Freies Textfeld (T)">Text <kbd>T</kbd></button>
   <button data-tool="callout" title="Notiz mit Linie zu einem Punkt (N)">Notiz mit Linie <kbd>N</kbd></button>
+  <button data-tool="place" title="Artikel einem Bereich zuordnen (P)">Artikel platzieren <kbd>P</kbd></button>
 </div>
 <div class="palette" id="palette" aria-label="Bausteine zum Zeichnen"></div>
 
@@ -235,6 +244,9 @@
   var tool = 'select', rectType = 'zone';
   var sel = null, draft = null, drag = null;
   var hist = [], hidx = -1;
+  var QKEY = KEY + '-queue';
+  var queue = '', placeMsg = '', placeZoneId = null;
+  try { queue = localStorage.getItem(QKEY) || ''; } catch (e) { /* ohne Speicher weiterarbeiten */ }
 
   var $ = function (id) { return document.getElementById(id); };
   var svg = $('svg'), gView = $('view'), gItems = $('items'), gHandles = $('handles'), panel = $('panel');
@@ -251,6 +263,31 @@
   function renumber() { zonesSorted().forEach(function (z, i) { z.order = i + 1; }); }
   function nextOrder() { var m = 0; zonesSorted().forEach(function (z) { m = Math.max(m, z.order || 0); }); return m + 1; }
   function lines(s) { return String(s || '').split(/[\n,;]+/).map(function (t) { return t.trim(); }).filter(Boolean); }
+  function norm(s) { return String(s || '').toLowerCase().replace(/[^\p{L}\p{N}\s]/gu, '').replace(/\s+/g, ' ').trim(); }
+  function saveQueue() { try { localStorage.setItem(QKEY, queue); } catch (e) { /* ohne Speicher weiterarbeiten */ } }
+  function queueList() { return String(queue || '').split(/\n+/).map(function (s) { return s.trim(); }).filter(Boolean); }
+  function activeName() { var q = queueList(); return q.length ? q[0] : ''; }
+  function zoneOfItem(name) {
+    var k = norm(name); if (!k) return null;
+    var zs = zonesSorted();
+    for (var i = 0; i < zs.length; i++) if (lines(zs[i].items).some(function (n) { return norm(n) === k; })) return zs[i];
+    return null;
+  }
+  function removeItemEverywhere(name) {
+    var k = norm(name);
+    zonesSorted().forEach(function (z) { z.items = lines(z.items).filter(function (n) { return norm(n) !== k; }).join('\n'); if (z.pins) delete z.pins[k]; });
+  }
+  function placeActive(zone, pt) {
+    var name = activeName();
+    if (!name) { placeMsg = 'Schreib zuerst einen Artikel in das Feld.'; renderPanel(); return; }
+    var from = zoneOfItem(name);
+    removeItemEverywhere(name);
+    zone.items = lines(zone.items).concat([name]).join('\n');
+    if (pt) { zone.pins = zone.pins || {}; zone.pins[norm(name)] = { n: name, x: Math.round(pt.x * 10) / 10, y: Math.round(pt.y * 10) / 10 }; }
+    var q = queueList(); q.shift(); queue = q.join('\n'); saveQueue();
+    placeMsg = '„' + name + '“ liegt jetzt in „' + (zone.name || 'Bereich') + '“.' + (from && from.id !== zone.id ? ' (vorher: „' + (from.name || 'Bereich') + '“)' : '');
+    commit(); render(); renderPanel();
+  }
   function uniq(a) { var seen = {}; return a.filter(function (x) { var k = x.toLowerCase(); if (seen[k]) return false; seen[k] = 1; return true; }); }
 
   /* ---------- Speichern, Verlauf ---------- */
@@ -280,7 +317,7 @@
 
   function boxSVG(it, isSel, isDraft) {
     var x = it.x * U, y = it.y * U, w = Math.max(it.w, 0) * U, h = Math.max(it.h, 0) * U;
-    var s = '<g class="it' + (isSel ? ' sel' : '') + (isDraft ? ' draft' : '') + '" data-id="' + it.id + '">';
+    var s = '<g class="it' + (isSel ? ' sel' : '') + (isDraft ? ' draft' : '') + (it.id === placeZoneId ? ' target' : '') + '" data-id="' + it.id + '">';
     var cls = 'lbl';
     if (it.kind === 'text') {
       s += '<rect class="hit" x="' + x + '" y="' + y + '" width="' + w + '" height="' + h + '"/>';
@@ -314,11 +351,24 @@
     gView.setAttribute('transform', 'translate(' + view.x + ' ' + view.y + ') scale(' + view.k + ')');
     var list = state.items.slice().sort(function (a, b) { return rank(a) - rank(b); });
     if (draft) list.push(draft);
+    var az = tool === 'place' ? zoneOfItem(activeName()) : null;
+    placeZoneId = az ? az.id : null;
     var h = '';
     list.forEach(function (it) {
       var isD = it === draft;
       h += it.kind === 'line' ? lineSVG(it, it.id === sel, isD) : boxSVG(it, it.id === sel, isD);
     });
+    if (tool === 'place') {
+      var an2 = norm(activeName()), fs = 0.62;
+      state.items.forEach(function (z) {
+        if (!z.pins) return;
+        Object.keys(z.pins).forEach(function (k) {
+          var pn = z.pins[k], act = k === an2;
+          h += '<g class="pin' + (act ? ' act' : '') + '" pointer-events="none"><circle cx="' + pn.x * U + '" cy="' + pn.y * U + '" r="' + (act ? 7 : 5) + '" fill="' + (act ? '#e11d48' : '#1d4ed8') + '" stroke="#fff" stroke-width="1.5"/>' +
+            '<text x="' + (pn.x * U + 9) + '" y="' + (pn.y * U + 4) + '" font-size="11" font-weight="600" fill="#111" stroke="#fff" stroke-width="3" paint-order="stroke">' + esc(pn.n) + '</text></g>';
+        });
+      });
+    }
     gItems.innerHTML = h;
     renderHandles();
   }
@@ -341,7 +391,9 @@
 
   /* ---------- Werkzeuge ---------- */
   function setTool(t, type) {
+    var was = tool;
     tool = t; if (type) rectType = type;
+    if (was !== t && (was === 'place' || t === 'place')) { if (t === 'place') sel = null; draft = null; render(); renderPanel(); }
     svg.setAttribute('data-tool', t === 'rect' ? 'rect' : t);
     document.querySelectorAll('#tools button').forEach(function (b) { b.classList.toggle('on', b.dataset.tool === tool); });
     document.querySelectorAll('#palette button').forEach(function (b) { b.classList.toggle('on', tool === 'rect' && b.dataset.type === rectType); });
@@ -402,12 +454,23 @@
       svg.setAttribute('data-tool', 'pan');
       return;
     }
+    if (tool === 'place') {
+      var pEl = e.target.closest && e.target.closest('[data-id]');
+      var pz = pEl && get(pEl.getAttribute('data-id'));
+      if (pz && pz.kind === 'rect' && pz.type === 'zone') drag = { mode: 'placeclick', pt: p, id: pz.id, sx: e.clientX, sy: e.clientY, s: panStart, moved: false };
+      else { drag = { mode: 'pan', s: panStart }; svg.setAttribute('data-tool', 'pan'); }
+      return;
+    }
     drag = { mode: 'draw', start: sp, tool: tool };
   });
 
   svg.addEventListener('pointermove', function (e) {
     if (!drag) return;
     var p = toUnits(e), sp = { x: snap(p.x), y: snap(p.y) };
+    if (drag.mode === 'placeclick') {
+      if (!drag.moved && Math.abs(e.clientX - drag.sx) + Math.abs(e.clientY - drag.sy) > 6) { drag.moved = true; drag.mode = 'pan'; }
+      else return;
+    }
     if (drag.mode === 'pan') {
       view.x = drag.s.vx + (e.clientX - drag.s.cx); view.y = drag.s.vy + (e.clientY - drag.s.cy);
       render(); return;
@@ -448,6 +511,7 @@
     var d = drag; drag = null;
     try { svg.releasePointerCapture(e.pointerId); } catch (x) { /* schon frei */ }
     svg.setAttribute('data-tool', tool);
+    if (d.mode === 'placeclick') { var zz = get(d.id); if (zz && e.type === 'pointerup') placeActive(zz, d.pt); return; }
     if (d.mode === 'pan') { save(); return; }
     if (d.mode === 'move' || d.mode === 'handle') { commit(); renderPanel(); return; }
     if (d.mode === 'draw') {
@@ -503,6 +567,14 @@
   function typeOptions(cur) {
     return TYPE_ORDER.map(function (t) { return '<option value="' + t + '"' + (t === cur ? ' selected' : '') + '>' + TYPES[t].label + '</option>'; }).join('');
   }
+  function placedOverviewHTML() {
+    var zs = zonesSorted();
+    if (!zs.length) return '<p class="hint">Noch kein Bereich. Wähle oben „Bereich“ und zieh ein Rechteck auf.</p>';
+    return '<div class="zl">' + zs.map(function (z, i) {
+      var n = lines(z.items).length;
+      return '<div class="zi' + (z.id === placeZoneId ? ' cur' : '') + '"><span class="n">' + (i + 1) + '</span><span class="nm" data-pick="' + z.id + '" title="' + esc(lines(z.items).join(', ')) + '">' + esc(z.name || 'Bereich') + '</span><span class="hint">' + n + '</span></div>';
+    }).join('') + '</div>';
+  }
   function zoneListHTML(curId) {
     var zs = zonesSorted();
     if (!zs.length) return '<p class="hint">Noch kein Bereich. Wähle oben „Bereich“ und zieh ein Rechteck auf.</p>';
@@ -523,7 +595,18 @@
   }
   function renderPanel() {
     var it = sel && get(sel), h = '';
-    if (!it) {
+    if (tool === 'place') {
+      var an = activeName(), az = an ? zoneOfItem(an) : null, rest = queueList().length;
+      h += '<h2>Artikel platzieren</h2>' +
+        '<p class="hint">Schreib Artikel auf, einen pro Zeile. Der oberste ist „dran“. Klick im Plan auf den Bereich, in dem er liegt: Er wird dort eingetragen, der nächste ist dran. Steht der Artikel schon woanders, wird er verschoben.</p>' +
+        '<label>Artikel (einer pro Zeile)<textarea id="pq" rows="6" placeholder="z. B.&#10;Gurken&#10;Bananen&#10;Butter" spellcheck="false">' + esc(queue) + '</textarea></label>' +
+        (an ? '<div class="now"><small>Jetzt dran' + (rest > 1 ? ' (noch ' + (rest - 1) + ' danach)' : '') + '</small><b>' + esc(an) + '</b><small>' +
+          (az ? 'liegt aktuell in: ' + esc(az.name || 'Bereich') + ' (im Plan hervorgehoben)' : 'noch keinem Bereich zugeordnet') + '</small></div>'
+          : '<div class="now empty">Nichts mehr offen. Schreib den nächsten Artikel oben ins Feld.</div>') +
+        '<div class="bar"><button id="pskip"' + (rest > 1 ? '' : ' disabled') + '>Überspringen</button><button id="punplace"' + (az ? '' : ' disabled') + '>Zuordnung entfernen</button></div>' +
+        '<div class="pmsg" role="status">' + esc(placeMsg) + '</div>' +
+        '<h3>Bereiche und ihre Artikel</h3>' + placedOverviewHTML();
+    } else if (!it) {
       h += '<h2>Zeichenblatt</h2><p class="hint">Wähle oben ein Werkzeug oder einen Baustein und zieh auf dem Blatt ein Rechteck auf. Ein einfacher Klick setzt ein Teil in Standardgröße. Alles rastet am Kästchen ein.</p>' +
         '<p class="hint">Verschieben: ziehen. Größe: Quadrate an den Ecken. Blatt bewegen: auf leere Fläche ziehen. Zoom: Mausrad.</p>' +
         '<h3>Laufweg der Bereiche</h3>' + zoneListHTML(null);
@@ -557,6 +640,7 @@
 
   panel.addEventListener('input', function (e) {
     var it = sel && get(sel), t = e.target;
+    if (t.id === 'pq') { queue = t.value; saveQueue(); render(); refreshNow(); return; }
     if (!it) return;
     if (t.dataset.f) {
       it[t.dataset.f] = t.value;
@@ -571,6 +655,16 @@
       it[t.dataset.n] = v; render(); save();
     }
   });
+  function refreshNow() {
+    var box = panel.querySelector('.now,.now.empty'); if (!box) return;
+    var an = activeName(), az = an ? zoneOfItem(an) : null, rest = queueList().length;
+    box.className = 'now' + (an ? '' : ' empty');
+    box.innerHTML = an ? '<small>Jetzt dran' + (rest > 1 ? ' (noch ' + (rest - 1) + ' danach)' : '') + '</small><b>' + esc(an) + '</b><small>' +
+      (az ? 'liegt aktuell in: ' + esc(az.name || 'Bereich') + ' (im Plan hervorgehoben)' : 'noch keinem Bereich zugeordnet') + '</small>'
+      : 'Nichts mehr offen. Schreib den nächsten Artikel oben ins Feld.';
+    var s = $('pskip'); if (s) s.disabled = rest <= 1;
+    var u = $('punplace'); if (u) u.disabled = !az;
+  }
   function refreshZoneNames() {
     panel.querySelectorAll('[data-pick]').forEach(function (n) { var z = get(n.dataset.pick); if (z) n.textContent = z.name || 'Bereich'; });
   }
@@ -587,7 +681,9 @@
   panel.addEventListener('click', function (e) {
     var b = e.target.closest('button, [data-pick]');
     if (!b) return;
-    if (b.dataset.pick) { sel = b.dataset.pick; render(); renderPanel(); return; }
+    if (b.id === 'pskip') { var q = queueList(); if (q.length > 1) { q.push(q.shift()); queue = q.join('\n'); saveQueue(); placeMsg = ''; render(); renderPanel(); } return; }
+    if (b.id === 'punplace') { var an = activeName(); if (an && zoneOfItem(an)) { removeItemEverywhere(an); placeMsg = 'Zuordnung für „' + an + '“ entfernt.'; commit(); render(); renderPanel(); } return; }
+    if (b.dataset.pick) { if (tool === 'place') return; sel = b.dataset.pick; render(); renderPanel(); return; }
     if (b.dataset.up || b.dataset.down) {
       var id = b.dataset.up || b.dataset.down, zs = zonesSorted(), i = zs.findIndex(function (z) { return z.id === id; }), j = b.dataset.up ? i - 1 : i + 1;
       if (j < 0 || j >= zs.length) return;
@@ -635,7 +731,7 @@
     var sx = function (v) { return +(v / W).toFixed(4); };
     var sy = function (v) { return +(v / (W * ASPECT)).toFixed(4); };
     var zones = zonesSorted().map(function (z) {
-      return { name: z.name, look: z.look || '', categories: uniq(lines(z.cats)), items: uniq(lines(z.items)), x: fx(z.x), y: fy(z.y), w: sx(z.w), h: sy(z.h) };
+      return { name: z.name, look: z.look || '', categories: uniq(lines(z.cats)), items: uniq(lines(z.items)), pins: Object.keys(z.pins || {}).filter(function (k) { return lines(z.items).some(function (n) { return norm(n) === k; }); }).map(function (k) { var q = z.pins[k]; return { name: q.n, x: fx(q.x * U / U), y: fy(q.y) }; }), x: fx(z.x), y: fy(z.y), w: sx(z.w), h: sy(z.h) };
     });
     var els = [];
     state.items.forEach(function (it) {
@@ -674,7 +770,7 @@
     var W = 60, items = [], r = function (v) { return Math.round(v); };
     (d.zones || []).forEach(function (z, i) {
       var w = Math.max(2, r((z.w || 0.2) * W)), h = Math.max(2, r((z.h || 0.1) * W * ASPECT));
-      items.push({ id: uid(), kind: 'rect', type: 'zone', name: z.name || 'Bereich', x: r((z.x || 0) * W), y: r((z.y || 0) * W * ASPECT), w: w, h: h, order: i + 1, look: z.look || '', cats: (z.categories || []).join('\n'), items: (z.items || []).join('\n'), note: '' });
+      items.push({ id: uid(), kind: 'rect', type: 'zone', name: z.name || 'Bereich', x: r((z.x || 0) * W), y: r((z.y || 0) * W * ASPECT), w: w, h: h, order: i + 1, look: z.look || '', cats: (z.categories || []).join('\n'), items: (z.items || []).join('\n'), note: '', pins: (function () { var o = {}; (z.pins || []).forEach(function (q) { o[norm(q.name)] = { n: q.name, x: Math.round((q.x || 0) * W * 10) / 10, y: Math.round((q.y || 0) * W * ASPECT * 10) / 10 }; }); return o; })() });
     });
     (d.elements || []).forEach(function (e) {
       var x = r((e.x || 0) * W), y = r((e.y || 0) * W * ASPECT), w = Math.max(1, r((e.w || 0.1) * W)), h = Math.max(1, r((e.h || 0.05) * W * ASPECT));
@@ -753,7 +849,7 @@
     if (mod) return;
     if (k === 'delete' || k === 'backspace') { if (sel) { e.preventDefault(); removeSel(); } return; }
     if (k === 'escape') { setTool('select'); sel = null; draft = null; render(); renderPanel(); return; }
-    if (k === 'v') setTool('select'); else if (k === 'l') setTool('line'); else if (k === 't') setTool('text'); else if (k === 'n') setTool('callout');
+    if (k === 'v') setTool('select'); else if (k === 'l') setTool('line'); else if (k === 't') setTool('text'); else if (k === 'n') setTool('callout'); else if (k === 'p') setTool('place');
     else if (k === 'r') setTool('rect', rectType);
     var it = sel && get(sel), step = 0;
     if (it && k.indexOf('arrow') === 0) {
