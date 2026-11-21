@@ -358,8 +358,8 @@
       var isD = it === draft;
       h += it.kind === 'line' ? lineSVG(it, it.id === sel, isD) : boxSVG(it, it.id === sel, isD);
     });
-    if (tool === 'place') {
-      var an2 = norm(activeName()), fs = 0.62;
+    {
+      var an2 = tool === 'place' ? norm(activeName()) : '', fs = 0.62;
       state.items.forEach(function (z) {
         if (!z.pins) return;
         Object.keys(z.pins).forEach(function (k) {
