@@ -1,5 +1,11 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data:; connect-src 'none'; form-action 'none'; base-uri 'none'">
+<meta name="referrer" content="no-referrer">
 <title>Marktplan-Editor</title>
-<meta name="claude:viewport-fit-sides" content="cover">
 <style>
   /* Konzept: Rechenpapier. Blaue Rasterlinien auf hellem Blatt, Werkzeugleiste oben, Eigenschaften rechts.
      Farben je Bausteintyp wie in der App, damit der Export wiedererkennbar bleibt. */
@@ -169,6 +175,8 @@
   }
   @media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
 </style>
+</head>
+<body>
 
 <div class="bar">
   <h1>Marktplan-Editor</h1>
@@ -288,6 +296,42 @@
     var q = queueList(); q.shift(); queue = q.join('\n'); saveQueue();
     placeMsg = '„' + name + '“ liegt jetzt in „' + (zone.name || 'Bereich') + '“.' + (from && from.id !== zone.id ? ' (vorher: „' + (from.name || 'Bereich') + '“)' : '');
     commit(); render(); renderPanel();
+  }
+  /* Eingaben sind nur Daten: alles wird auf bekannte Felder, Typen und Grenzen gebracht. */
+  var KINDS = { rect: 1, line: 1, text: 1, callout: 1 };
+  var LOOKS = { '': 1, shelf: 1, aisle: 1, fridge: 1, produce: 1, bakery: 1, promo: 1, counter: 1 };
+  function cnum(v, d) { v = Number(v); return isFinite(v) ? Math.max(-10000, Math.min(10000, v)) : d; }
+  function cstr(v, max) { return (typeof v === 'string' ? v : '').replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f]/g, '').slice(0, max); }
+  function cleanItems(arr) {
+    var out = [];
+    if (!Array.isArray(arr)) return out;
+    arr.slice(0, 2000).forEach(function (s) {
+      if (!s || typeof s !== 'object' || !KINDS[s.kind]) return;
+      var it = { id: uid(), kind: s.kind, type: 'shelf', name: cstr(s.name, 200), x: cnum(s.x, 0), y: cnum(s.y, 0), note: cstr(s.note, 2000) };
+      if (s.kind === 'line') { it.type = 'wall'; it.x2 = cnum(s.x2, it.x); it.y2 = cnum(s.y2, it.y); }
+      else {
+        it.w = Math.max(1, cnum(s.w, 4)); it.h = Math.max(1, cnum(s.h, 2));
+        if (s.kind === 'text') it.type = 'text';
+        else if (s.kind === 'callout') { it.type = 'callout'; it.x2 = cnum(s.x2, it.x); it.y2 = cnum(s.y2, it.y); }
+        else {
+          it.type = Object.prototype.hasOwnProperty.call(TYPES, s.type) ? s.type : 'shelf';
+          it.cats = cstr(s.cats, 20000); it.items = cstr(s.items, 50000);
+          it.look = LOOKS[s.look] ? s.look : '';
+          it.order = Math.max(0, Math.round(cnum(s.order, 0)));
+          if (s.pins && typeof s.pins === 'object') {
+            it.pins = {};
+            Object.keys(s.pins).slice(0, 2000).forEach(function (k) {
+              var q = s.pins[k];
+              if (!q || typeof q !== 'object') return;
+              var n = cstr(q.n, 200); if (!n) return;
+              it.pins[norm(n)] = { n: n, x: cnum(q.x, 0), y: cnum(q.y, 0) };
+            });
+          }
+        }
+      }
+      out.push(it);
+    });
+    return out;
   }
   function uniq(a) { var seen = {}; return a.filter(function (x) { var k = x.toLowerCase(); if (seen[k]) return false; seen[k] = 1; return true; }); }
 
@@ -794,8 +838,9 @@
     var data;
     try { data = JSON.parse(text.slice(a, z + 1)); } catch (e) { setStatus('Der Text ist kein gültiger Plan.', true); return; }
     var items = null;
-    if (data.format === 'shopili-plan-editor' && Array.isArray(data.items)) items = data.items.map(function (i) { i.id = i.id || uid(); return i; });
+    if (data.format === 'shopili-plan-editor' && Array.isArray(data.items)) items = cleanItems(data.items);
     else if (data.format === 'shopili-plan') items = fromAppPlan(data);
+    if (items && !items.length) items = null;
     if (!items) { setStatus('Das Format kenne ich nicht.', true); return; }
     state.items = items; sel = null; renumber(); commit(); fit(); renderPanel();
     setStatus(items.length + ' Teile geladen.');
@@ -814,6 +859,7 @@
       } else if (e.type === 'text') items.push({ id: uid(), kind: 'text', type: 'text', name: e.name || 'Text', x: x, y: y, w: w, h: h, note: '' });
       else items.push({ id: uid(), kind: 'rect', type: TYPES[e.type] ? e.type : 'shelf', name: e.name || '', x: x, y: y, w: w, h: h, cats: '', items: '', note: '' });
     });
+    items = cleanItems(items);
     return items.length ? items : null;
   }
 
@@ -899,7 +945,7 @@
   var loaded = false;
   try {
     var raw = localStorage.getItem(KEY);
-    if (raw) { var d = JSON.parse(raw); if (d && Array.isArray(d.items)) { state.items = d.items; if (d.view) view = d.view; loaded = true; } }
+    if (raw) { var d = JSON.parse(raw); if (d && Array.isArray(d.items)) { var ci = cleanItems(d.items); if (ci.length) { state.items = ci; if (d.view && typeof d.view === 'object') view = { x: cnum(d.view.x, 30), y: cnum(d.view.y, 30), k: Math.max(0.1, Math.min(8, cnum(d.view.k, 1))) }; loaded = true; } } }
   } catch (e) { /* ohne gespeicherten Stand starten */ }
   if (!loaded) {
     state.items = sample();
@@ -910,15 +956,25 @@
   if (!loaded) requestAnimationFrame(fit);
   window.addEventListener('resize', renderHandles);
 
+  window.addEventListener('hashchange', function () { if (/^#plan=/.test(location.hash)) location.reload(); });
   /* ---------- Plan aus der App (Link mit #plan=...) ---------- */
   (function fromHash() {
     var m = /^#plan=([A-Za-z0-9_-]+)$/.exec(location.hash || '');
     if (!m || typeof DecompressionStream === 'undefined') return;
     var b64 = m[1].replace(/-/g, '+').replace(/_/g, '/');
     while (b64.length % 4) b64 += '=';
+    if (m[1].length > 400000) { setStatus('Der Plan aus der App ist zu groß.', true); return; }
     var bin = atob(b64), bytes = new Uint8Array(bin.length);
     for (var i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
-    new Response(new Blob([bytes]).stream().pipeThrough(new DecompressionStream('deflate-raw'))).text().then(function (txt) {
+    var rd = new Blob([bytes]).stream().pipeThrough(new DecompressionStream('deflate-raw')).getReader(), parts = [], total = 0;
+    (function pump() {
+      return rd.read().then(function (r) {
+        if (r.done) return;
+        total += r.value.length;
+        if (total > 3000000) { rd.cancel(); throw new Error('zu groß'); }
+        parts.push(r.value); return pump();
+      });
+    })().then(function () { return new Blob(parts).text(); }).then(function (txt) {
       try { localStorage.setItem(KEY + '-backup', localStorage.getItem(KEY) || ''); } catch (e) { /* egal */ }
       loadText(txt);
       $('banner').hidden = false;
@@ -928,3 +984,6 @@
   })();
 })();
 </script>
+
+</body>
+</html>
