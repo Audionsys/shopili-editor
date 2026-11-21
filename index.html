@@ -245,6 +245,7 @@
   var sel = null, draft = null, drag = null;
   var hist = [], hidx = -1;
   var QKEY = KEY + '-queue';
+  var lastPinTap = { k: '', t: 0 };
   var queue = '', placeMsg = '', placeZoneId = null;
   try { queue = localStorage.getItem(QKEY) || ''; } catch (e) { /* ohne Speicher weiterarbeiten */ }
 
@@ -364,7 +365,7 @@
         if (!z.pins) return;
         Object.keys(z.pins).forEach(function (k) {
           var pn = z.pins[k], act = k === an2;
-          h += '<g class="pin' + (act ? ' act' : '') + '" pointer-events="none"><circle cx="' + pn.x * U + '" cy="' + pn.y * U + '" r="' + (act ? 7 : 5) + '" fill="' + (act ? '#e11d48' : '#1d4ed8') + '" stroke="#fff" stroke-width="1.5"/>' +
+          h += '<g class="pin' + (act ? ' act' : '') + '" data-pin="' + z.id + '|' + esc(k) + '" pointer-events="' + (tool === 'place' ? 'all' : 'none') + '" style="cursor:grab"><circle cx="' + pn.x * U + '" cy="' + pn.y * U + '" r="' + (act ? 7 : 5) + '" fill="' + (act ? '#e11d48' : '#1d4ed8') + '" stroke="#fff" stroke-width="1.5"/>' +
             '<text x="' + (pn.x * U + 9) + '" y="' + (pn.y * U + 4) + '" font-size="11" font-weight="600" fill="#111" stroke="#fff" stroke-width="3" paint-order="stroke">' + esc(pn.n) + '</text></g>';
         });
       });
@@ -455,6 +456,17 @@
       return;
     }
     if (tool === 'place') {
+      var pinEl = e.target.closest && e.target.closest('[data-pin]');
+      if (pinEl) {
+        var pp = pinEl.getAttribute('data-pin').split('|'), pzn = get(pp[0]);
+        var nowT = Date.now();
+        if (pzn && pzn.pins && pzn.pins[pp[1]] && lastPinTap.k === pinEl.getAttribute('data-pin') && nowT - lastPinTap.t < 400) {
+          var pname = pzn.pins[pp[1]].n; removeItemEverywhere(pname); lastPinTap = { k: '', t: 0 };
+          placeMsg = '„' + pname + '“ gelöscht (Punkt und Zuordnung).'; commit(); render(); renderPanel(); return;
+        }
+        lastPinTap = { k: pinEl.getAttribute('data-pin'), t: nowT };
+        if (pzn && pzn.pins && pzn.pins[pp[1]]) { drag = { mode: 'pin', zid: pp[0], key: pp[1], orig: { x: pzn.pins[pp[1]].x, y: pzn.pins[pp[1]].y } }; return; }
+      }
       var pEl = e.target.closest && e.target.closest('[data-id]');
       var pz = pEl && get(pEl.getAttribute('data-id'));
       if (pz && pz.kind === 'rect' && pz.type === 'zone') drag = { mode: 'placeclick', pt: p, id: pz.id, sx: e.clientX, sy: e.clientY, s: panStart, moved: false };
@@ -470,6 +482,11 @@
     if (drag.mode === 'placeclick') {
       if (!drag.moved && Math.abs(e.clientX - drag.sx) + Math.abs(e.clientY - drag.sy) > 6) { drag.moved = true; drag.mode = 'pan'; }
       else return;
+    }
+    if (drag.mode === 'pin') {
+      var pz0 = get(drag.zid), pn0 = pz0 && pz0.pins && pz0.pins[drag.key];
+      if (pn0) { pn0.x = Math.round(p.x * 10) / 10; pn0.y = Math.round(p.y * 10) / 10; render(); }
+      return;
     }
     if (drag.mode === 'pan') {
       view.x = drag.s.vx + (e.clientX - drag.s.cx); view.y = drag.s.vy + (e.clientY - drag.s.cy);
@@ -512,6 +529,23 @@
     try { svg.releasePointerCapture(e.pointerId); } catch (x) { /* schon frei */ }
     svg.setAttribute('data-tool', tool);
     if (d.mode === 'placeclick') { var zz = get(d.id); if (zz && e.type === 'pointerup') placeActive(zz, d.pt); return; }
+    if (d.mode === 'pin') {
+      var oz = get(d.zid), pn = oz && oz.pins && oz.pins[d.key];
+      if (!pn) return;
+      var hit = null, ha = 1e9;
+      state.items.forEach(function (z) {
+        if (z.kind === 'rect' && z.type === 'zone' && pn.x >= z.x && pn.x <= z.x + z.w && pn.y >= z.y && pn.y <= z.y + z.h && z.w * z.h < ha) { hit = z; ha = z.w * z.h; }
+      });
+      if (!hit || e.type !== 'pointerup') { pn.x = d.orig.x; pn.y = d.orig.y; render(); return; }
+      if (hit.id !== oz.id) {
+        delete oz.pins[d.key];
+        oz.items = lines(oz.items).filter(function (n) { return norm(n) !== d.key; }).join('\n');
+        hit.items = lines(hit.items).concat([pn.n]).join('\n');
+        hit.pins = hit.pins || {}; hit.pins[d.key] = pn;
+        placeMsg = '„' + pn.n + '“ liegt jetzt in „' + (hit.name || 'Bereich') + '“.';
+      } else placeMsg = '„' + pn.n + '“ verschoben.';
+      commit(); render(); renderPanel(); return;
+    }
     if (d.mode === 'pan') { save(); return; }
     if (d.mode === 'move' || d.mode === 'handle') { commit(); renderPanel(); return; }
     if (d.mode === 'draw') {
@@ -598,7 +632,7 @@
     if (tool === 'place') {
       var an = activeName(), az = an ? zoneOfItem(an) : null, rest = queueList().length;
       h += '<h2>Artikel platzieren</h2>' +
-        '<p class="hint">Schreib Artikel auf, einen pro Zeile. Der oberste ist „dran“. Klick im Plan auf den Bereich, in dem er liegt: Er wird dort eingetragen, der nächste ist dran. Steht der Artikel schon woanders, wird er verschoben.</p>' +
+        '<p class="hint">Schreib Artikel auf, einen pro Zeile. Der oberste ist „dran“. Klick im Plan auf den Bereich, in dem er liegt: Er wird dort eingetragen, der nächste ist dran. Steht der Artikel schon woanders, wird er verschoben. Punkte kannst du ziehen; Doppelklick auf einen Punkt löscht ihn.</p>' +
         '<label>Artikel (einer pro Zeile)<textarea id="pq" rows="6" placeholder="z. B.&#10;Gurken&#10;Bananen&#10;Butter" spellcheck="false">' + esc(queue) + '</textarea></label>' +
         (an ? '<div class="now"><small>Jetzt dran' + (rest > 1 ? ' (noch ' + (rest - 1) + ' danach)' : '') + '</small><b>' + esc(an) + '</b><small>' +
           (az ? 'liegt aktuell in: ' + esc(az.name || 'Bereich') + ' (im Plan hervorgehoben)' : 'noch keinem Bereich zugeordnet') + '</small></div>'
