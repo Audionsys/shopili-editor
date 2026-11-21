@@ -909,5 +909,22 @@
   renumber(); commit(); render(); renderPanel();
   if (!loaded) requestAnimationFrame(fit);
   window.addEventListener('resize', renderHandles);
+
+  /* ---------- Plan aus der App (Link mit #plan=...) ---------- */
+  (function fromHash() {
+    var m = /^#plan=([A-Za-z0-9_-]+)$/.exec(location.hash || '');
+    if (!m || typeof DecompressionStream === 'undefined') return;
+    var b64 = m[1].replace(/-/g, '+').replace(/_/g, '/');
+    while (b64.length % 4) b64 += '=';
+    var bin = atob(b64), bytes = new Uint8Array(bin.length);
+    for (var i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+    new Response(new Blob([bytes]).stream().pipeThrough(new DecompressionStream('deflate-raw'))).text().then(function (txt) {
+      try { localStorage.setItem(KEY + '-backup', localStorage.getItem(KEY) || ''); } catch (e) { /* egal */ }
+      loadText(txt);
+      $('banner').hidden = false;
+      $('bannerText').textContent = 'Plan aus der App geladen. Wenn du fertig bist: „Für die App kopieren“ und in der App importieren.';
+      history.replaceState(null, '', location.pathname);
+    }).catch(function () { setStatus('Der Plan aus der App konnte nicht gelesen werden.', true); });
+  })();
 })();
 </script>
