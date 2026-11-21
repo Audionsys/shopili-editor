@@ -1,0 +1,783 @@
+<title>Marktplan-Editor</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<style>
+  /* Konzept: Rechenpapier. Blaue Rasterlinien auf hellem Blatt, Werkzeugleiste oben, Eigenschaften rechts.
+     Farben je Bausteintyp wie in der App, damit der Export wiedererkennbar bleibt. */
+  :root {
+    --paper: #f8fafd;
+    --grid: #d5e0f2;
+    --grid-major: #a9bde0;
+    --ink: #1c2a48;
+    --muted: #5a6a88;
+    --line: #cdd6e6;
+    --panel: #ffffff;
+    --panel-2: #eef2f9;
+    --accent: #2850c8;
+    --accent-ink: #ffffff;
+    --danger: #b3261e;
+    --stroke: #3f5078;
+    --c-zone: #e1e8fa;
+    --c-shelf: #e4e7ec;
+    --c-aisle: #d9dee6;
+    --c-fridge: #c9e6fb;
+    --c-produce: #cfeacf;
+    --c-bakery: #efdfc8;
+    --c-promo: #ffe0bd;
+    --c-counter: #dce1f3;
+    --c-deposit: #e2deef;
+    --c-entrance: #f2d6ee;
+    --c-checkout: #d3d9e3;
+    --c-wall: #1c2a48;
+    --note-bg: #fffdf2;
+    --font: system-ui, -apple-system, 'Segoe UI', sans-serif;
+    --font-display: system-ui, sans-serif;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --paper: #141b2b; --grid: #232e46; --grid-major: #34466a; --ink: #e3eafa; --muted: #94a4c4;
+      --line: #2c3856; --panel: #1a2237; --panel-2: #222c46; --accent: #7fa0ff; --accent-ink: #0d1530;
+      --danger: #ff8f86; --stroke: #8fa3d0;
+      --c-zone: #2a3a66; --c-shelf: #343c4e; --c-aisle: #3a4254; --c-fridge: #1f4a6e; --c-produce: #2c5a35;
+      --c-bakery: #5e4a30; --c-promo: #6a4a22; --c-counter: #33406a; --c-deposit: #433d63;
+      --c-entrance: #5e3858; --c-checkout: #3b4358; --c-wall: #c3d0f0; --note-bg: #2b2a1c;
+      color-scheme: dark;
+    }
+  }
+  :root[data-theme="dark"] {
+    --paper: #141b2b; --grid: #232e46; --grid-major: #34466a; --ink: #e3eafa; --muted: #94a4c4;
+    --line: #2c3856; --panel: #1a2237; --panel-2: #222c46; --accent: #7fa0ff; --accent-ink: #0d1530;
+    --danger: #ff8f86; --stroke: #8fa3d0;
+    --c-zone: #2a3a66; --c-shelf: #343c4e; --c-aisle: #3a4254; --c-fridge: #1f4a6e; --c-produce: #2c5a35;
+    --c-bakery: #5e4a30; --c-promo: #6a4a22; --c-counter: #33406a; --c-deposit: #433d63;
+    --c-entrance: #5e3858; --c-checkout: #3b4358; --c-wall: #c3d0f0; --note-bg: #2b2a1c;
+    color-scheme: dark;
+  }
+
+  html, body { height: 100%; }
+  body {
+    background: var(--paper); color: var(--ink); font-family: var(--font);
+    padding-left: max(16px, env(safe-area-inset-left, 0px));
+    padding-right: max(16px, env(safe-area-inset-right, 0px));
+    padding-block: 12px;
+    display: flex; flex-direction: column; gap: 10px; box-sizing: border-box;
+  }
+  h1 { font-family: var(--font-display); font-size: 1.15rem; font-weight: 600; margin: 0; letter-spacing: .01em; }
+  button, select, input, textarea { font: inherit; color: inherit; }
+  button {
+    background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 6px 11px;
+    cursor: pointer; min-height: 34px;
+  }
+  button:hover { border-color: var(--accent); }
+  button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+  button.on { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
+  button.danger { color: var(--danger); }
+  button:disabled { opacity: .45; cursor: default; }
+
+  .bar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+  .bar .sp { flex: 1 1 auto; }
+  .tools, .palette { display: flex; flex-wrap: wrap; gap: 6px; }
+  .tools button kbd { font-family: var(--font); font-size: .72rem; color: var(--muted); margin-left: 5px; }
+  .tools button.on kbd { color: var(--accent-ink); opacity: .8; }
+  .chip { display: inline-flex; align-items: center; gap: 6px; padding: 4px 10px; min-height: 30px; font-size: .85rem; }
+  .sw { width: 12px; height: 12px; border-radius: 3px; border: 1px solid var(--stroke); display: inline-block; }
+
+  .work { flex: 1 1 auto; min-height: 0; display: flex; gap: 10px; }
+  .sheet { flex: 1 1 auto; min-width: 0; position: relative; border: 1px solid var(--line); border-radius: 10px; overflow: hidden; background: var(--paper); }
+  svg#svg { width: 100%; height: 100%; display: block; touch-action: none; user-select: none; -webkit-user-select: none; }
+  svg#svg[data-tool="select"] { cursor: grab; }
+  svg#svg[data-tool="pan"] { cursor: grabbing; }
+  svg#svg:not([data-tool="select"]):not([data-tool="pan"]) { cursor: crosshair; }
+  .hud { position: absolute; right: 10px; bottom: 10px; display: flex; gap: 6px; }
+  .hud button { min-width: 34px; background: var(--panel); }
+  .banner {
+    position: absolute; left: 10px; top: 10px; max-width: min(430px, calc(100% - 20px)); background: var(--panel);
+    border: 1px solid var(--line); border-radius: 8px; padding: 6px 10px; font-size: .82rem; color: var(--muted);
+    display: flex; gap: 8px; align-items: center;
+  }
+  .banner button { min-height: 26px; padding: 2px 8px; font-size: .8rem; }
+
+  .it .shape { stroke: var(--stroke); stroke-width: 1.4; vector-effect: non-scaling-stroke; cursor: move; }
+  .it .hit { fill: transparent; cursor: move; }
+  .it.sel .shape { stroke: var(--accent); stroke-width: 2.4; }
+  .it.sel .hit { stroke: var(--accent); stroke-width: 1.4; stroke-dasharray: 4 3; vector-effect: non-scaling-stroke; }
+  .t-zone { fill: var(--c-zone); } .t-shelf { fill: var(--c-shelf); } .t-aisle { fill: var(--c-aisle); }
+  .t-fridge { fill: var(--c-fridge); } .t-produce { fill: var(--c-produce); } .t-bakery { fill: var(--c-bakery); }
+  .t-promo { fill: var(--c-promo); } .t-counter { fill: var(--c-counter); } .t-deposit { fill: var(--c-deposit); }
+  .t-entrance { fill: var(--c-entrance); } .t-checkout { fill: var(--c-checkout); }
+  .note { fill: var(--note-bg); stroke: var(--stroke); stroke-width: 1.2; vector-effect: non-scaling-stroke; stroke-dasharray: 5 3; cursor: move; }
+  .it.sel .note { stroke: var(--accent); stroke-width: 2.2; }
+  .leader { stroke: var(--stroke); stroke-width: 1.4; vector-effect: non-scaling-stroke; fill: none; }
+  .it.sel .leader { stroke: var(--accent); }
+  .dot { fill: var(--stroke); }
+  .it.sel .dot { fill: var(--accent); }
+  .wall { stroke: var(--c-wall); stroke-width: 6; stroke-linecap: square; }
+  .wallhit { stroke: transparent; stroke-width: 16; cursor: move; }
+  .it.sel .wall { stroke: var(--accent); }
+  .fo { pointer-events: none; overflow: hidden; }
+  .lbl { box-sizing: border-box; width: 100%; height: 100%; padding: 3px 5px; font: 500 11px/1.25 var(--font); color: var(--ink);
+         overflow: hidden; display: flex; align-items: center; justify-content: center; text-align: center; word-break: break-word; }
+  .lbl.zone { align-items: flex-start; justify-content: flex-start; text-align: left; padding: 4px 4px 4px 28px; font-weight: 600; }
+  .lbl.big { font-size: 13px; }
+  .lbl.note { font-weight: 400; align-items: flex-start; justify-content: flex-start; text-align: left; }
+  .badge { fill: var(--accent); }
+  .badge-t { fill: var(--accent-ink); font: 600 11px var(--font); text-anchor: middle; dominant-baseline: central; pointer-events: none; }
+  .h { fill: var(--panel); stroke: var(--accent); stroke-width: 1.6; vector-effect: non-scaling-stroke; }
+  .h[data-h="nw"], .h[data-h="se"] { cursor: nwse-resize; }
+  .h[data-h="ne"], .h[data-h="sw"] { cursor: nesw-resize; }
+  .h[data-h="p1"], .h[data-h="p2"], .h[data-h="target"] { cursor: move; }
+  .draft { opacity: .6; pointer-events: none; }
+
+  aside {
+    flex: 0 0 310px; max-width: 100%; background: var(--panel); border: 1px solid var(--line); border-radius: 10px;
+    padding: 12px; overflow: auto; display: flex; flex-direction: column; gap: 10px; box-sizing: border-box;
+  }
+  aside h2 { font-family: var(--font-display); font-size: .95rem; margin: 0; font-weight: 600; }
+  aside h3 { font-size: .72rem; font-weight: 600; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); margin: 4px 0 0; }
+  label { display: flex; flex-direction: column; gap: 3px; font-size: .78rem; color: var(--muted); }
+  input, select, textarea {
+    background: var(--paper); border: 1px solid var(--line); border-radius: 7px; padding: 6px 8px; font-size: .9rem; color: var(--ink);
+    min-width: 0; width: 100%; box-sizing: border-box;
+  }
+  textarea { resize: vertical; min-height: 60px; }
+  .row { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; }
+  .hint { font-size: .8rem; color: var(--muted); line-height: 1.4; margin: 0; }
+  .zl { display: flex; flex-direction: column; gap: 3px; }
+  .zi { display: flex; align-items: center; gap: 6px; border: 1px solid var(--line); border-radius: 8px; padding: 3px 4px 3px 8px; background: var(--paper); }
+  .zi.cur { border-color: var(--accent); }
+  .zi .n { width: 1.4em; font-weight: 600; color: var(--accent); }
+  .zi .nm { flex: 1 1 auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; cursor: pointer; font-size: .88rem; }
+  .zi button { min-height: 26px; padding: 0 7px; }
+  .status { font-size: .82rem; color: var(--muted); min-height: 1.2em; }
+  .status.err { color: var(--danger); }
+  details summary { cursor: pointer; font-weight: 600; font-size: .9rem; }
+  .exp { display: flex; flex-direction: column; gap: 6px; margin-top: 8px; }
+  #out { min-height: 90px; font-family: ui-monospace, Menlo, Consolas, monospace; font-size: .75rem; }
+
+  @media (max-width: 820px) {
+    body { height: auto; }
+    .work { flex-direction: column; }
+    .sheet { height: 62vh; flex: none; }
+    aside { flex: none; }
+  }
+  @media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
+</style>
+
+<div class="bar">
+  <h1>Marktplan-Editor</h1>
+  <span class="sp"></span>
+  <button id="undo" title="Rückgängig (Strg+Z)">↶ Zurück</button>
+  <button id="redo" title="Wiederholen (Strg+Y)">↷ Vor</button>
+  <button id="aldi" title="Aldi-Grundriss aus deiner Excel-Datei laden">Aldi-Vorlage laden</button>
+  <button id="newplan" title="Leeres Blatt anfangen">Leeres Blatt</button>
+</div>
+
+<div class="bar tools" id="tools">
+  <button data-tool="select" title="Auswählen und verschieben (V)">Auswählen <kbd>V</kbd></button>
+  <button data-tool="line" title="Wand oder Linie ziehen (L)">Wand / Linie <kbd>L</kbd></button>
+  <button data-tool="text" title="Freies Textfeld (T)">Text <kbd>T</kbd></button>
+  <button data-tool="callout" title="Notiz mit Linie zu einem Punkt (N)">Notiz mit Linie <kbd>N</kbd></button>
+</div>
+<div class="palette" id="palette" aria-label="Bausteine zum Zeichnen"></div>
+
+<div class="work">
+  <div class="sheet" id="sheet">
+    <svg id="svg" data-tool="select" role="img" aria-label="Kariertes Zeichenblatt">
+      <defs>
+        <pattern id="g1" width="24" height="24" patternUnits="userSpaceOnUse">
+          <path d="M24 0H0V24" fill="none" stroke="var(--grid)" stroke-width="1"/>
+        </pattern>
+        <pattern id="g5" width="120" height="120" patternUnits="userSpaceOnUse">
+          <path d="M120 0H0V120" fill="none" stroke="var(--grid-major)" stroke-width="1.2"/>
+        </pattern>
+      </defs>
+      <g id="view">
+        <rect x="-6000" y="-6000" width="12000" height="12000" fill="url(#g1)"/>
+        <rect x="-6000" y="-6000" width="12000" height="12000" fill="url(#g5)"/>
+        <g id="items"></g>
+        <g id="handles"></g>
+      </g>
+    </svg>
+    <div class="banner" id="banner" hidden><span id="bannerText"></span><button id="bannerClose">Ausblenden</button></div>
+    <div class="hud">
+      <button id="zout" title="Verkleinern" aria-label="Verkleinern">−</button>
+      <button id="zin" title="Vergrößern" aria-label="Vergrößern">+</button>
+      <button id="fit" title="Alles zeigen">Alles zeigen</button>
+    </div>
+  </div>
+
+  <aside id="panel"></aside>
+</div>
+
+<script>
+(function () {
+  'use strict';
+  var U = 24;               // Weltpixel pro Kästchen
+  var ASPECT = 1.5;         // Höhe/Breite des Handy-Bildschirms, für den Export in die App
+  var KEY = 'marktplan-editor-v1';
+
+  var TYPES = {
+    zone:     { label: 'Bereich',        w: 8,  h: 4 },
+    shelf:    { label: 'Regal',          w: 6,  h: 1 },
+    aisle:    { label: 'Gang-Regal',     w: 2,  h: 10 },
+    fridge:   { label: 'Kühlung',        w: 10, h: 2 },
+    produce:  { label: 'Auslage',        w: 4,  h: 3 },
+    bakery:   { label: 'Brotstand',      w: 4,  h: 2 },
+    promo:    { label: 'Aktionsfläche',  w: 6,  h: 3 },
+    counter:  { label: 'Theke',          w: 8,  h: 2 },
+    deposit:  { label: 'Pfandautomat',   w: 2,  h: 2 },
+    entrance: { label: 'Eingang',        w: 4,  h: 2 },
+    checkout: { label: 'Kasse',          w: 6,  h: 2 }
+  };
+  var TYPE_ORDER = ['zone', 'shelf', 'aisle', 'fridge', 'produce', 'bakery', 'promo', 'counter', 'deposit', 'entrance', 'checkout'];
+
+  var state = { items: [] };
+  var view = { x: 30, y: 30, k: 1 };
+  var tool = 'select', rectType = 'zone';
+  var sel = null, draft = null, drag = null;
+  var hist = [], hidx = -1;
+
+  var $ = function (id) { return document.getElementById(id); };
+  var svg = $('svg'), gView = $('view'), gItems = $('items'), gHandles = $('handles'), panel = $('panel');
+
+  function uid() { return Math.random().toString(36).slice(2, 9); }
+  function esc(s) { return String(s == null ? '' : s).replace(/[&<>"]/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]; }); }
+  function get(id) { for (var i = 0; i < state.items.length; i++) if (state.items[i].id === id) return state.items[i]; return null; }
+  function clone(o) { return JSON.parse(JSON.stringify(o)); }
+  function isBox(it) { return it.kind === 'rect' || it.kind === 'text' || it.kind === 'callout'; }
+  function zonesSorted() {
+    return state.items.filter(function (i) { return i.kind === 'rect' && i.type === 'zone'; })
+      .sort(function (a, b) { return (a.order || 999) - (b.order || 999); });
+  }
+  function renumber() { zonesSorted().forEach(function (z, i) { z.order = i + 1; }); }
+  function nextOrder() { var m = 0; zonesSorted().forEach(function (z) { m = Math.max(m, z.order || 0); }); return m + 1; }
+  function lines(s) { return String(s || '').split(/[\n,;]+/).map(function (t) { return t.trim(); }).filter(Boolean); }
+  function uniq(a) { var seen = {}; return a.filter(function (x) { var k = x.toLowerCase(); if (seen[k]) return false; seen[k] = 1; return true; }); }
+
+  /* ---------- Speichern, Verlauf ---------- */
+  function save() { try { localStorage.setItem(KEY, JSON.stringify({ items: state.items, view: view })); } catch (e) { /* ohne Speicher weiterarbeiten */ } }
+  function commit() {
+    var snap = JSON.stringify(state.items);
+    if (hidx >= 0 && hist[hidx] === snap) return;
+    hist = hist.slice(0, hidx + 1); hist.push(snap); if (hist.length > 120) hist.shift(); hidx = hist.length - 1;
+    save(); updateUndo();
+  }
+  function restore(i) {
+    hidx = i; state.items = JSON.parse(hist[hidx]);
+    if (sel && !get(sel)) sel = null;
+    save(); render(); renderPanel(); updateUndo();
+  }
+  function updateUndo() { $('undo').disabled = hidx <= 0; $('redo').disabled = hidx >= hist.length - 1; }
+
+  /* ---------- Koordinaten ---------- */
+  function toUnits(e) {
+    var r = svg.getBoundingClientRect();
+    return { x: ((e.clientX - r.left - view.x) / view.k) / U, y: ((e.clientY - r.top - view.y) / view.k) / U };
+  }
+  function snap(v) { return Math.round(v); }
+
+  /* ---------- Zeichnen ---------- */
+  function rank(it) { return it.kind === 'rect' ? (it.type === 'zone' ? 0 : 1) : it.kind === 'line' ? 2 : it.kind === 'text' ? 3 : 4; }
+
+  function boxSVG(it, isSel, isDraft) {
+    var x = it.x * U, y = it.y * U, w = Math.max(it.w, 0) * U, h = Math.max(it.h, 0) * U;
+    var s = '<g class="it' + (isSel ? ' sel' : '') + (isDraft ? ' draft' : '') + '" data-id="' + it.id + '">';
+    var cls = 'lbl';
+    if (it.kind === 'text') {
+      s += '<rect class="hit" x="' + x + '" y="' + y + '" width="' + w + '" height="' + h + '"/>';
+      cls += ' big';
+    } else if (it.kind === 'callout') {
+      var tx = it.x2 * U, ty = it.y2 * U, cx = x + w / 2, cy = y + h / 2, dx = tx - cx, dy = ty - cy;
+      var inside = Math.abs(dx) < w / 2 && Math.abs(dy) < h / 2;
+      if (!inside && (dx || dy)) {
+        var t = Math.min(dx ? (w / 2) / Math.abs(dx) : Infinity, dy ? (h / 2) / Math.abs(dy) : Infinity);
+        s += '<line class="leader" x1="' + (cx + dx * t) + '" y1="' + (cy + dy * t) + '" x2="' + tx + '" y2="' + ty + '"/>';
+      }
+      s += '<circle class="dot" cx="' + tx + '" cy="' + ty + '" r="4.5"/>';
+      s += '<rect class="note" x="' + x + '" y="' + y + '" width="' + w + '" height="' + h + '" rx="4"/>';
+      cls += ' note';
+    } else {
+      s += '<rect class="shape t-' + (it.type === 'zone' && it.look ? it.look : it.type) + '" x="' + x + '" y="' + y + '" width="' + w + '" height="' + h + '" rx="3"/>';
+      if (it.type === 'zone') cls += ' zone';
+    }
+    s += '<foreignObject class="fo" x="' + x + '" y="' + y + '" width="' + w + '" height="' + h + '"><div class="' + cls + '">' + esc(it.name) + '</div></foreignObject>';
+    if (it.kind === 'rect' && it.type === 'zone') {
+      var idx = zonesSorted().indexOf(it) + 1;
+      s += '<circle class="badge" cx="' + (x + 14) + '" cy="' + (y + 14) + '" r="10"/><text class="badge-t" x="' + (x + 14) + '" y="' + (y + 14) + '">' + (idx > 0 ? idx : '') + '</text>';
+    }
+    return s + '</g>';
+  }
+  function lineSVG(it, isSel, isDraft) {
+    var a = 'x1="' + it.x * U + '" y1="' + it.y * U + '" x2="' + it.x2 * U + '" y2="' + it.y2 * U + '"';
+    return '<g class="it' + (isSel ? ' sel' : '') + (isDraft ? ' draft' : '') + '" data-id="' + it.id + '"><line class="wallhit" ' + a + '/><line class="wall" ' + a + '/></g>';
+  }
+  function render() {
+    gView.setAttribute('transform', 'translate(' + view.x + ' ' + view.y + ') scale(' + view.k + ')');
+    var list = state.items.slice().sort(function (a, b) { return rank(a) - rank(b); });
+    if (draft) list.push(draft);
+    var h = '';
+    list.forEach(function (it) {
+      var isD = it === draft;
+      h += it.kind === 'line' ? lineSVG(it, it.id === sel, isD) : boxSVG(it, it.id === sel, isD);
+    });
+    gItems.innerHTML = h;
+    renderHandles();
+  }
+  function handleRect(x, y, name, size) {
+    return '<rect class="h" data-h="' + name + '" x="' + (x - size / 2) + '" y="' + (y - size / 2) + '" width="' + size + '" height="' + size + '" rx="2"/>';
+  }
+  function renderHandles() {
+    var it = sel && get(sel), s = '', size = 11 / view.k;
+    if (it && !draft) {
+      if (it.kind === 'line') {
+        s += handleRect(it.x * U, it.y * U, 'p1', size) + handleRect(it.x2 * U, it.y2 * U, 'p2', size);
+      } else {
+        var x1 = it.x * U, y1 = it.y * U, x2 = (it.x + it.w) * U, y2 = (it.y + it.h) * U;
+        s += handleRect(x1, y1, 'nw', size) + handleRect(x2, y1, 'ne', size) + handleRect(x1, y2, 'sw', size) + handleRect(x2, y2, 'se', size);
+        if (it.kind === 'callout') s += '<circle class="h" data-h="target" cx="' + it.x2 * U + '" cy="' + it.y2 * U + '" r="' + size * 0.7 + '"/>';
+      }
+    }
+    gHandles.innerHTML = s;
+  }
+
+  /* ---------- Werkzeuge ---------- */
+  function setTool(t, type) {
+    tool = t; if (type) rectType = type;
+    svg.setAttribute('data-tool', t === 'rect' ? 'rect' : t);
+    document.querySelectorAll('#tools button').forEach(function (b) { b.classList.toggle('on', b.dataset.tool === tool); });
+    document.querySelectorAll('#palette button').forEach(function (b) { b.classList.toggle('on', tool === 'rect' && b.dataset.type === rectType); });
+  }
+  function buildPalette() {
+    $('palette').innerHTML = TYPE_ORDER.map(function (t) {
+      return '<button class="chip" data-type="' + t + '" title="' + TYPES[t].label + ' zeichnen"><span class="sw" style="background:var(--c-' + t + ')"></span>' + TYPES[t].label + '</button>';
+    }).join('');
+  }
+
+  function newItem(kind, a, b) {
+    var id = uid();
+    if (kind === 'rect') {
+      var t = TYPES[rectType];
+      var it = { id: id, kind: 'rect', type: rectType, name: rectType === 'zone' ? 'Bereich ' + nextOrder() : t.label, x: a.x, y: a.y, w: a.w, h: a.h, cats: '', items: '', note: '' };
+      if (rectType === 'zone') it.order = nextOrder();
+      return it;
+    }
+    if (kind === 'text') return { id: id, kind: 'text', type: 'text', name: 'Text', x: a.x, y: a.y, w: a.w, h: a.h, note: '' };
+    if (kind === 'callout') return { id: id, kind: 'callout', type: 'callout', name: 'Notiz', x: a.x, y: a.y, w: a.w, h: a.h, x2: a.x + a.w + 2, y2: a.y + a.h + 2, note: '' };
+    return { id: id, kind: 'line', type: 'wall', name: '', x: a.x, y: a.y, x2: b.x, y2: b.y, note: '' };
+  }
+  function boxFrom(p0, p1) {
+    return { x: Math.min(p0.x, p1.x), y: Math.min(p0.y, p1.y), w: Math.abs(p1.x - p0.x), h: Math.abs(p1.y - p0.y) };
+  }
+  function defaultSize(kind) {
+    if (kind === 'rect') return TYPES[rectType];
+    if (kind === 'text') return { w: 6, h: 2 };
+    return { w: 8, h: 3 };
+  }
+
+  /* ---------- Zeiger ---------- */
+  svg.addEventListener('pointerdown', function (e) {
+    if (e.button === 2) return;
+    svg.setPointerCapture(e.pointerId);
+    var p = toUnits(e), sp = { x: snap(p.x), y: snap(p.y) };
+    var panStart = { cx: e.clientX, cy: e.clientY, vx: view.x, vy: view.y };
+    if (e.button === 1) { drag = { mode: 'pan', s: panStart }; setTool(tool); return; }
+
+    if (tool === 'select') {
+      var hEl = e.target.closest && e.target.closest('[data-h]');
+      var iEl = e.target.closest && e.target.closest('[data-id]');
+      if (hEl && sel) {
+        var it0 = get(sel);
+        drag = { mode: 'handle', h: hEl.getAttribute('data-h'), orig: clone(it0) };
+        return;
+      }
+      if (iEl) {
+        var it1 = get(iEl.getAttribute('data-id'));
+        if (it1) {
+          if (sel !== it1.id) { sel = it1.id; render(); renderPanel(); }
+          drag = { mode: 'move', start: p, orig: clone(it1), moved: false };
+          return;
+        }
+      }
+      if (sel) { sel = null; render(); renderPanel(); }
+      drag = { mode: 'pan', s: panStart };
+      svg.setAttribute('data-tool', 'pan');
+      return;
+    }
+    drag = { mode: 'draw', start: sp, tool: tool };
+  });
+
+  svg.addEventListener('pointermove', function (e) {
+    if (!drag) return;
+    var p = toUnits(e), sp = { x: snap(p.x), y: snap(p.y) };
+    if (drag.mode === 'pan') {
+      view.x = drag.s.vx + (e.clientX - drag.s.cx); view.y = drag.s.vy + (e.clientY - drag.s.cy);
+      render(); return;
+    }
+    if (drag.mode === 'move') {
+      var dx = snap(p.x - drag.start.x), dy = snap(p.y - drag.start.y), it = get(sel), o = drag.orig;
+      if (!it) return;
+      if (dx || dy) drag.moved = true;
+      it.x = o.x + dx; it.y = o.y + dy;
+      if (o.x2 != null && o.kind !== 'callout') { it.x2 = o.x2 + dx; it.y2 = o.y2 + dy; }
+      render(); syncFields(); return;
+    }
+    if (drag.mode === 'handle') {
+      var t = get(sel), og = drag.orig, h = drag.h;
+      if (!t) return;
+      if (h === 'p1') { t.x = sp.x; t.y = sp.y; }
+      else if (h === 'p2') { t.x2 = sp.x; t.y2 = sp.y; }
+      else if (h === 'target') { t.x2 = sp.x; t.y2 = sp.y; }
+      else {
+        var x1 = og.x, y1 = og.y, x2 = og.x + og.w, y2 = og.y + og.h;
+        if (h.indexOf('n') >= 0) y1 = Math.min(sp.y, y2 - 1);
+        if (h.indexOf('s') >= 0) y2 = Math.max(sp.y, y1 + 1);
+        if (h.indexOf('w') >= 0) x1 = Math.min(sp.x, x2 - 1);
+        if (h.indexOf('e') >= 0) x2 = Math.max(sp.x, x1 + 1);
+        t.x = x1; t.y = y1; t.w = x2 - x1; t.h = y2 - y1;
+      }
+      render(); syncFields(); return;
+    }
+    if (drag.mode === 'draw') {
+      if (drag.tool === 'line') draft = newItem('line', drag.start, sp);
+      else { var b = boxFrom(drag.start, sp); draft = newItem(drag.tool === 'rect' ? 'rect' : drag.tool, b); }
+      render();
+    }
+  });
+
+  function endDrag(e) {
+    if (!drag) return;
+    var d = drag; drag = null;
+    try { svg.releasePointerCapture(e.pointerId); } catch (x) { /* schon frei */ }
+    svg.setAttribute('data-tool', tool);
+    if (d.mode === 'pan') { save(); return; }
+    if (d.mode === 'move' || d.mode === 'handle') { commit(); renderPanel(); return; }
+    if (d.mode === 'draw') {
+      var p = toUnits(e), sp = { x: snap(p.x), y: snap(p.y) }, it;
+      draft = null;
+      if (d.tool === 'line') {
+        if (sp.x === d.start.x && sp.y === d.start.y) { render(); return; }
+        it = newItem('line', d.start, sp);
+      } else {
+        var kind = d.tool === 'rect' ? 'rect' : d.tool, b = boxFrom(d.start, sp);
+        if (b.w < 1 || b.h < 1) { var ds = defaultSize(kind); b = { x: d.start.x, y: d.start.y, w: ds.w, h: ds.h }; }
+        it = newItem(kind, b);
+      }
+      state.items.push(it); sel = it.id;
+      setTool('select');
+      commit(); render(); renderPanel();
+      var nm = $('f-name'); if (nm) { nm.focus(); nm.select(); }
+    }
+  }
+  svg.addEventListener('pointerup', endDrag);
+  svg.addEventListener('pointercancel', endDrag);
+
+  svg.addEventListener('wheel', function (e) {
+    e.preventDefault();
+    var r = svg.getBoundingClientRect(), mx = e.clientX - r.left, my = e.clientY - r.top;
+    zoomAt(mx, my, Math.exp(-e.deltaY * 0.0015));
+  }, { passive: false });
+  function zoomAt(mx, my, f) {
+    var k = Math.min(4, Math.max(0.12, view.k * f)), r = k / view.k;
+    view.x = mx - (mx - view.x) * r; view.y = my - (my - view.y) * r; view.k = k; render(); save();
+  }
+  function fit() {
+    var b = bbox(state.items);
+    var r = svg.getBoundingClientRect();
+    if (!b) { view = { x: 30, y: 30, k: 1 }; render(); return; }
+    var w = Math.max(1, b.maxX - b.minX) * U, h = Math.max(1, b.maxY - b.minY) * U;
+    var k = Math.min(4, Math.max(0.12, Math.min((r.width - 60) / w, (r.height - 60) / h)));
+    view.k = k; view.x = (r.width - w * k) / 2 - b.minX * U * k; view.y = (r.height - h * k) / 2 - b.minY * U * k;
+    render(); save();
+  }
+  function bbox(items) {
+    var minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity, n = 0;
+    items.forEach(function (it) {
+      if (it.kind === 'callout') return;
+      n++;
+      if (it.kind === 'line') { minX = Math.min(minX, it.x, it.x2); maxX = Math.max(maxX, it.x, it.x2); minY = Math.min(minY, it.y, it.y2); maxY = Math.max(maxY, it.y, it.y2); }
+      else { minX = Math.min(minX, it.x); maxX = Math.max(maxX, it.x + it.w); minY = Math.min(minY, it.y); maxY = Math.max(maxY, it.y + it.h); }
+    });
+    return n ? { minX: minX, minY: minY, maxX: maxX, maxY: maxY } : null;
+  }
+
+  /* ---------- Eigenschaften ---------- */
+  function typeOptions(cur) {
+    return TYPE_ORDER.map(function (t) { return '<option value="' + t + '"' + (t === cur ? ' selected' : '') + '>' + TYPES[t].label + '</option>'; }).join('');
+  }
+  function zoneListHTML(curId) {
+    var zs = zonesSorted();
+    if (!zs.length) return '<p class="hint">Noch kein Bereich. Wähle oben „Bereich“ und zieh ein Rechteck auf.</p>';
+    return '<div class="zl">' + zs.map(function (z, i) {
+      return '<div class="zi' + (z.id === curId ? ' cur' : '') + '"><span class="n">' + (i + 1) + '</span><span class="nm" data-pick="' + z.id + '">' + esc(z.name || 'Bereich') + '</span>' +
+        '<button data-up="' + z.id + '" title="Früher im Laufweg"' + (i === 0 ? ' disabled' : '') + '>▲</button>' +
+        '<button data-down="' + z.id + '" title="Später im Laufweg"' + (i === zs.length - 1 ? ' disabled' : '') + '>▼</button></div>';
+    }).join('') + '</div>';
+  }
+  function exportHTML() {
+    return '<details id="exp"><summary>Weitergeben und laden</summary><div class="exp">' +
+      '<button id="ex-app" class="on">Plan für die App kopieren</button>' +
+      '<p class="hint">In der App: Plan → ⋮ → Plan importieren → einfügen.</p>' +
+      '<button id="ex-full">Alles für Claude kopieren</button>' +
+      '<p class="hint">Enthält auch Notizen, Linien und Texte. Schick es mir im Chat.</p>' +
+      '<textarea id="out" placeholder="Hier erscheint der Text. Zum Laden einen Plan hier einfügen und auf „Text laden“ klicken." spellcheck="false"></textarea>' +
+      '<button id="ex-load">Text laden</button><div class="status" id="status" role="status"></div></div></details>';
+  }
+  function renderPanel() {
+    var it = sel && get(sel), h = '';
+    if (!it) {
+      h += '<h2>Zeichenblatt</h2><p class="hint">Wähle oben ein Werkzeug oder einen Baustein und zieh auf dem Blatt ein Rechteck auf. Ein einfacher Klick setzt ein Teil in Standardgröße. Alles rastet am Kästchen ein.</p>' +
+        '<p class="hint">Verschieben: ziehen. Größe: Quadrate an den Ecken. Blatt bewegen: auf leere Fläche ziehen. Zoom: Mausrad.</p>' +
+        '<h3>Laufweg der Bereiche</h3>' + zoneListHTML(null);
+    } else {
+      var isLine = it.kind === 'line', isRect = it.kind === 'rect', isZone = isRect && it.type === 'zone';
+      h += '<h2>' + (isLine ? 'Wand / Linie' : it.kind === 'text' ? 'Text' : it.kind === 'callout' ? 'Notiz mit Linie' : esc(TYPES[it.type].label)) + '</h2>';
+      if (isRect) h += '<label>Art<select id="f-type" data-f="type">' + typeOptions(it.type) + '</select></label>';
+      if (isZone) h += '<label>Aussehen<select data-f="look">' + ['', 'shelf', 'aisle', 'fridge', 'produce', 'bakery', 'promo', 'counter'].map(function (l) { return '<option value="' + l + '"' + (l === (it.look || '') ? ' selected' : '') + '>' + (l ? TYPES[l].label : 'Neutral') + '</option>'; }).join('') + '</select></label>';
+      if (!isLine) h += '<label>' + (it.kind === 'text' || it.kind === 'callout' ? 'Text' : 'Name') + '<' + (it.kind === 'text' || it.kind === 'callout' ? 'textarea' : 'input') + ' id="f-name" data-f="name"' + (it.kind === 'text' || it.kind === 'callout' ? '>' + esc(it.name) + '</textarea>' : ' value="' + esc(it.name) + '">') + '</label>';
+      if (isZone) {
+        h += '<label>Kategorien<textarea id="f-cats" data-f="cats" placeholder="z. B. Milchprodukte, Käse">' + esc(it.cats) + '</textarea></label>' +
+          '<label>Artikel fest zugeordnet<textarea id="f-items" data-f="items" placeholder="ein Artikel pro Zeile">' + esc(it.items) + '</textarea></label>';
+      }
+      if (!isLine && it.kind !== 'text') h += '<label>Notiz für mich<textarea data-f="note" placeholder="wird nicht in die App übernommen">' + esc(it.note) + '</textarea></label>';
+      h += '<h3>Lage</h3>';
+      if (isLine) h += '<div class="row"><label>x1<input type="number" data-n="x" id="n-x" value="' + it.x + '"></label><label>y1<input type="number" data-n="y" id="n-y" value="' + it.y + '"></label><label>x2<input type="number" data-n="x2" id="n-x2" value="' + it.x2 + '"></label><label>y2<input type="number" data-n="y2" id="n-y2" value="' + it.y2 + '"></label></div>';
+      else h += '<div class="row"><label>x<input type="number" data-n="x" id="n-x" value="' + it.x + '"></label><label>y<input type="number" data-n="y" id="n-y" value="' + it.y + '"></label><label>Breite<input type="number" min="1" data-n="w" id="n-w" value="' + it.w + '"></label><label>Höhe<input type="number" min="1" data-n="h" id="n-h" value="' + it.h + '"></label></div>';
+      h += '<div class="bar"><button id="dup">Duplizieren <kbd>Strg+D</kbd></button><button id="del" class="danger">Löschen</button></div>';
+      if (isZone) h += '<h3>Laufweg der Bereiche</h3>' + zoneListHTML(it.id);
+    }
+    h += exportHTML();
+    var keepOpen = $('exp') && $('exp').open, out = $('out') ? $('out').value : '';
+    panel.innerHTML = h;
+    if (keepOpen) $('exp').open = true;
+    if (out && $('out')) $('out').value = out;
+  }
+  function syncFields() {
+    var it = sel && get(sel); if (!it) return;
+    ['x', 'y', 'w', 'h', 'x2', 'y2'].forEach(function (k) { var f = $('n-' + k); if (f && it[k] != null && document.activeElement !== f) f.value = it[k]; });
+  }
+
+  panel.addEventListener('input', function (e) {
+    var it = sel && get(sel), t = e.target;
+    if (!it) return;
+    if (t.dataset.f) {
+      it[t.dataset.f] = t.value;
+      if (t.dataset.f === 'name' || t.dataset.f === 'type' || t.dataset.f === 'look') render();
+      if (t.dataset.f === 'name' && it.type === 'zone') refreshZoneNames();
+      save();
+    } else if (t.dataset.n) {
+      var v = parseFloat(t.value);
+      if (isNaN(v)) return;
+      v = Math.round(v);
+      if ((t.dataset.n === 'w' || t.dataset.n === 'h') && v < 1) return;
+      it[t.dataset.n] = v; render(); save();
+    }
+  });
+  function refreshZoneNames() {
+    panel.querySelectorAll('[data-pick]').forEach(function (n) { var z = get(n.dataset.pick); if (z) n.textContent = z.name || 'Bereich'; });
+  }
+  panel.addEventListener('change', function (e) {
+    var it = sel && get(sel), t = e.target;
+    if (!it) return;
+    if (t.id === 'f-type') {
+      it.type = t.value;
+      if (it.type === 'zone') { if (!it.order) it.order = nextOrder(); } else { it.order = null; renumber(); }
+      render(); commit(); renderPanel(); return;
+    }
+    commit();
+  });
+  panel.addEventListener('click', function (e) {
+    var b = e.target.closest('button, [data-pick]');
+    if (!b) return;
+    if (b.dataset.pick) { sel = b.dataset.pick; render(); renderPanel(); return; }
+    if (b.dataset.up || b.dataset.down) {
+      var id = b.dataset.up || b.dataset.down, zs = zonesSorted(), i = zs.findIndex(function (z) { return z.id === id; }), j = b.dataset.up ? i - 1 : i + 1;
+      if (j < 0 || j >= zs.length) return;
+      var tmp = zs[i]; zs[i] = zs[j]; zs[j] = tmp;
+      zs.forEach(function (z, n) { z.order = n + 1; });
+      commit(); render(); renderPanel(); return;
+    }
+    if (b.id === 'dup') duplicate();
+    else if (b.id === 'del') removeSel();
+    else if (b.id === 'ex-app') exportApp();
+    else if (b.id === 'ex-full') exportFull();
+    else if (b.id === 'ex-load') loadText($('out').value);
+  });
+
+  function removeSel() {
+    if (!sel) return;
+    state.items = state.items.filter(function (i) { return i.id !== sel; });
+    sel = null; renumber(); commit(); render(); renderPanel();
+  }
+  function duplicate() {
+    var it = sel && get(sel); if (!it) return;
+    var c = clone(it); c.id = uid();
+    c.x += 2; c.y += 2; if (c.x2 != null) { c.x2 += 2; c.y2 += 2; }
+    if (c.type === 'zone') { c.order = nextOrder(); c.name = c.name + ' (Kopie)'; }
+    state.items.push(c); sel = c.id; commit(); render(); renderPanel();
+  }
+
+  /* ---------- Export ---------- */
+  function setStatus(msg, err) { var s = $('status'); if (!s) return; s.textContent = msg; s.className = 'status' + (err ? ' err' : ''); }
+  function copyText(text, okMsg) {
+    var out = $('out'); if (out) out.value = text;
+    var d = $('exp'); if (d) d.open = true;
+    function fallback() { if (out) { out.focus(); out.select(); } setStatus('Automatisches Kopieren ging nicht. Der Text ist markiert: Strg+C drücken.', true); }
+    try {
+      if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(text).then(function () { setStatus(okMsg); }, fallback);
+      else fallback();
+    } catch (x) { fallback(); }
+  }
+  function exportApp() {
+    var b = bbox(state.items);
+    if (!b) { var d = $('exp'); if (d) d.open = true; setStatus('Das Blatt ist leer. Zeichne zuerst etwas.', true); return; }
+    var W = Math.max(20, b.maxX - b.minX), skipped = 0;
+    var fx = function (v) { return +((v - b.minX) / W).toFixed(4); };
+    var fy = function (v) { return +((v - b.minY) / (W * ASPECT)).toFixed(4); };
+    var sx = function (v) { return +(v / W).toFixed(4); };
+    var sy = function (v) { return +(v / (W * ASPECT)).toFixed(4); };
+    var zones = zonesSorted().map(function (z) {
+      return { name: z.name, look: z.look || '', categories: uniq(lines(z.cats)), items: uniq(lines(z.items)), x: fx(z.x), y: fy(z.y), w: sx(z.w), h: sy(z.h) };
+    });
+    var els = [];
+    state.items.forEach(function (it) {
+      if (it.kind === 'rect' && it.type !== 'zone') els.push({ type: it.type, name: it.name, x: fx(it.x), y: fy(it.y), w: sx(it.w), h: sy(it.h) });
+      else if (it.kind === 'text') els.push({ type: 'text', name: it.name, x: fx(it.x), y: fy(it.y), w: sx(it.w), h: sy(it.h) });
+      else if (it.kind === 'line') {
+        var th = 0.4;
+        if (it.y === it.y2) els.push({ type: 'wall', name: '', x: fx(Math.min(it.x, it.x2)), y: fy(it.y - th / 2), w: sx(Math.abs(it.x2 - it.x)), h: sy(th) });
+        else if (it.x === it.x2) els.push({ type: 'wall', name: '', x: fx(it.x - th / 2), y: fy(Math.min(it.y, it.y2)), w: sx(th), h: sy(Math.abs(it.y2 - it.y)) });
+        else skipped++;
+      }
+    });
+    var txt = JSON.stringify({ format: 'shopili-plan', version: 1, zones: zones, elements: els }, null, 2);
+    var extra = skipped ? ' ' + skipped + ' schräge Linie(n) werden nicht übernommen.' : '';
+    copyText(txt, zones.length + ' Bereiche und ' + els.length + ' Bauteile kopiert.' + extra);
+  }
+  function exportFull() {
+    renumber();
+    copyText(JSON.stringify({ format: 'shopili-plan-editor', version: 1, unit: 'Kästchen', items: state.items }, null, 2), 'Alles kopiert (' + state.items.length + ' Teile).');
+  }
+
+  /* ---------- Laden ---------- */
+  function loadText(text) {
+    var a = text.indexOf('{'), z = text.lastIndexOf('}');
+    if (a < 0 || z <= a) { setStatus('Kein Plan gefunden.', true); return; }
+    var data;
+    try { data = JSON.parse(text.slice(a, z + 1)); } catch (e) { setStatus('Der Text ist kein gültiger Plan.', true); return; }
+    var items = null;
+    if (data.format === 'shopili-plan-editor' && Array.isArray(data.items)) items = data.items.map(function (i) { i.id = i.id || uid(); return i; });
+    else if (data.format === 'shopili-plan') items = fromAppPlan(data);
+    if (!items) { setStatus('Das Format kenne ich nicht.', true); return; }
+    state.items = items; sel = null; renumber(); commit(); fit(); renderPanel();
+    setStatus(items.length + ' Teile geladen.');
+  }
+  function fromAppPlan(d) {
+    var W = 60, items = [], r = function (v) { return Math.round(v); };
+    (d.zones || []).forEach(function (z, i) {
+      var w = Math.max(2, r((z.w || 0.2) * W)), h = Math.max(2, r((z.h || 0.1) * W * ASPECT));
+      items.push({ id: uid(), kind: 'rect', type: 'zone', name: z.name || 'Bereich', x: r((z.x || 0) * W), y: r((z.y || 0) * W * ASPECT), w: w, h: h, order: i + 1, look: z.look || '', cats: (z.categories || []).join('\n'), items: (z.items || []).join('\n'), note: '' });
+    });
+    (d.elements || []).forEach(function (e) {
+      var x = r((e.x || 0) * W), y = r((e.y || 0) * W * ASPECT), w = Math.max(1, r((e.w || 0.1) * W)), h = Math.max(1, r((e.h || 0.05) * W * ASPECT));
+      if (e.type === 'wall') {
+        if (w >= h) items.push({ id: uid(), kind: 'line', type: 'wall', name: '', x: x, y: y, x2: x + w, y2: y, note: '' });
+        else items.push({ id: uid(), kind: 'line', type: 'wall', name: '', x: x, y: y, x2: x, y2: y + h, note: '' });
+      } else if (e.type === 'text') items.push({ id: uid(), kind: 'text', type: 'text', name: e.name || 'Text', x: x, y: y, w: w, h: h, note: '' });
+      else items.push({ id: uid(), kind: 'rect', type: TYPES[e.type] ? e.type : 'shelf', name: e.name || '', x: x, y: y, w: w, h: h, cats: '', items: '', note: '' });
+    });
+    return items.length ? items : null;
+  }
+
+  /* ---------- Beispiel ---------- */
+  function sample() {
+    var n = 0;
+    function zone(name, order, x, y, w, h, cats) { return { id: uid(), kind: 'rect', type: 'zone', name: name, order: order, x: x, y: y, w: w, h: h, cats: cats, items: '', note: '', look: ({ 'Obst und Gemüse': 'produce', 'Backwaren': 'bakery', 'Kühlregal': 'fridge', 'Tiefkühlung': 'fridge', 'Aktionsware': 'promo', 'Gang 1': 'aisle', 'Gang 2': 'aisle', 'Gang 3': 'aisle' })[name] || '' }; }
+    function box(type, name, x, y, w, h) { return { id: uid(), kind: 'rect', type: type, name: name, x: x, y: y, w: w, h: h, cats: '', items: '', note: '' }; }
+    return [
+      zone('Obst und Gemüse', 1, 54, 8, 5, 14, 'Obst\nGemüse'),
+      zone('Backwaren', 2, 44, 2, 14, 4, 'Brot und Backwaren'),
+      zone('Kühlregal', 3, 10, 2, 32, 4, 'Wurst\nKäse\nMilchprodukte'),
+      zone('Tiefkühlung', 4, 2, 8, 4, 22, 'Tiefkühlkost'),
+      zone('Aktionsware', 5, 14, 17, 22, 6, ''),
+      zone('Gang 1', 6, 14, 9, 3, 6, 'Konserven'), zone('Gang 2', 7, 24, 9, 3, 6, 'Nudeln\nReis'), zone('Gang 3', 8, 34, 9, 3, 6, 'Getränke'),
+      box('checkout', 'Kasse 1', 10, 34, 6, 2), box('checkout', 'Kasse 2', 18, 34, 6, 2),
+      box('checkout', 'Kasse 3', 26, 34, 6, 2), box('checkout', 'Kasse 4', 34, 34, 6, 2),
+      box('entrance', 'Eingang', 52, 34, 6, 3),
+      { id: uid(), kind: 'callout', type: 'callout', name: 'Beispiel: Tiefkühlung liegt hier nahe der Kasse (prüfen)', x: 40, y: 26, w: 12, h: 4, x2: 7, y2: 28, note: '' }
+    ];
+  }
+
+  /* ---------- Aldi-Vorlage (aus Franks Excel) ---------- */
+  var ALDI = [{"id":"a1","kind":"rect","type":"zone","name":"Obst und Gemüse (Insel)","look":"produce","order":1,"x":4,"y":64,"w":12,"h":7,"cats":"","items":"Pflaumen\nWeintrauben\nZitronen\nOrangen\nKaki\nBananen\nNektarinen\nSaisonales Obst\nLimetten\nMandarinen\nKiwi\nSalat\nZucchini\nAubergine\nKarotten","note":""},{"id":"a2","kind":"rect","type":"zone","name":"Obst und Gemüse (oben)","look":"produce","order":2,"x":4,"y":55,"w":14,"h":9,"cats":"","items":"Äpfel\nBirnen\nKiwi\nMaracuja\nMango\nKürbis\nKartoffeln\nZwiebeln","note":""},{"id":"a3","kind":"rect","type":"zone","name":"Obst und Gemüse (Wand links)","look":"produce","order":3,"x":0,"y":55,"w":4,"h":16,"cats":"","items":"Melonen\nHonigmelone\nWassermelone","note":""},{"id":"a4","kind":"rect","type":"zone","name":"Tomaten, Paprika, Kräuter","look":"produce","order":4,"x":18,"y":55,"w":4,"h":12,"cats":"","items":"Kräutertöpfe\nRosmarin\nBasilikum\nPaprika\nSpitzpaprika\nTomaten\nCherrytomaten\nRispentomaten","note":""},{"id":"a5","kind":"rect","type":"zone","name":"Kühlung Obst und Kräuter","look":"fridge","order":5,"x":4,"y":76,"w":8,"h":5,"cats":"","items":"Obst-Kühlung\nKräuter-Kühlung\nSaisonales Obst","note":""},{"id":"a6","kind":"rect","type":"zone","name":"Fleisch und Fisch","look":"fridge","order":6,"x":12,"y":76,"w":14,"h":5,"cats":"Fleisch\nFisch","items":"Grillsachen\nSpareribs","note":""},{"id":"a7","kind":"rect","type":"zone","name":"Eier und Brot","look":"shelf","order":7,"x":26,"y":76,"w":4,"h":5,"cats":"Eier\nBrot","items":"abgepacktes Brot","note":""},{"id":"a8","kind":"rect","type":"zone","name":"Backshop","look":"bakery","order":8,"x":30,"y":76,"w":10,"h":5,"cats":"Backwaren","items":"Aufbacksemmeln","note":""},{"id":"a9","kind":"rect","type":"zone","name":"Nudeln, Öl, Snacks","look":"aisle","order":9,"x":40,"y":76,"w":20,"h":5,"cats":"Nudeln\nSnacks","items":"Reis\nÖl\nEssig\nFett\nChips\nNussmischungen","note":""},{"id":"a10","kind":"rect","type":"zone","name":"Gang Papier, Getränke, Backen","look":"aisle","order":10,"x":24,"y":55,"w":32,"h":12,"cats":"Getränke","items":"Toastbrot\nKüchenrolle\nToilettenpapier\nSäfte\nWasser\nMehl\nZucker\nKonserven","note":""},{"id":"a11","kind":"rect","type":"zone","name":"Gang Bier (unten)","look":"aisle","order":11,"x":56,"y":55,"w":4,"h":12,"cats":"","items":"Dosenbier\nSpirituosen","note":""},{"id":"a12","kind":"rect","type":"zone","name":"Getränke Wand rechts","look":"fridge","order":12,"x":62,"y":25,"w":4,"h":34,"cats":"","items":"Spirituosen\nWein\nSekt\nBier","note":""},{"id":"a13","kind":"rect","type":"zone","name":"Gang Haustier, Drogerie, Süßes","look":"aisle","order":13,"x":28,"y":25,"w":28,"h":12,"cats":"Süßwaren","items":"Hundefutter\nHundeleckerli\nDeo\nDuschgel\nKosmetik\nSchokolade\nDuplo\nKinderschokolade","note":""},{"id":"a14","kind":"rect","type":"zone","name":"Gang Bier (mitte)","look":"aisle","order":14,"x":56,"y":25,"w":4,"h":12,"cats":"","items":"Dosenbier\nSpirituosen\n1-Euro-Aufsteller","note":""},{"id":"a15","kind":"rect","type":"zone","name":"Gang Frühstück","look":"aisle","order":15,"x":28,"y":8,"w":28,"h":12,"cats":"","items":"Marmelade\nHonig\nKaffeesahne\nMüsli\nKakao\nKaffee","note":""},{"id":"a16","kind":"rect","type":"zone","name":"Gang haltbare Milch und Wurst","look":"aisle","order":16,"x":56,"y":8,"w":4,"h":12,"cats":"","items":"H-Milch\nHafermilch\nHaltbare Wurst\nSalami\nSchmelzkäse","note":""},{"id":"a17","kind":"rect","type":"zone","name":"Kühlwand rechts","look":"fridge","order":17,"x":62,"y":8,"w":4,"h":11,"cats":"","items":"Butter\nKäse\nOfenkäse\nSchinken\nSalami","note":""},{"id":"a18","kind":"rect","type":"zone","name":"Kühlregal Fertigprodukte","look":"fridge","order":18,"x":18,"y":0,"w":14,"h":3,"cats":"","items":"Pizza\nSuppeneinlagen\nMaultaschen\nTeige\nAufstriche\nSalate\nLachs","note":""},{"id":"a19","kind":"rect","type":"zone","name":"Kühlregal Wurst","look":"fridge","order":19,"x":32,"y":0,"w":16,"h":3,"cats":"Wurst","items":"Weißwurst\nWiener\nNürnberger\nGrillwurst\nBacon","note":""},{"id":"a20","kind":"rect","type":"zone","name":"Kühlregal Käse","look":"fridge","order":20,"x":48,"y":0,"w":14,"h":3,"cats":"Käse","items":"Milchschnitte","note":""},{"id":"a21","kind":"rect","type":"zone","name":"Kühlregal Frisch","look":"fridge","order":21,"x":62,"y":0,"w":4,"h":3,"cats":"","items":"Frischkäse\nJoghurt\nHefe\nButter","note":""},{"id":"a22","kind":"rect","type":"zone","name":"Aktionsware","look":"promo","order":22,"x":4,"y":8,"w":12,"h":12,"cats":"","items":"Aktionsware Weihnachten\nHalloween\nOstern\nGartensaison","note":""},{"id":"a23","kind":"rect","type":"zone","name":"Andere Aktionen","look":"promo","order":23,"x":18,"y":8,"w":8,"h":12,"cats":"","items":"","note":""},{"id":"a24","kind":"rect","type":"zone","name":"Tiefkühl-Truhen","look":"fridge","order":24,"x":0,"y":3,"w":4,"h":21,"cats":"Tiefkühlkost","items":"Speiseeis\nTiefkühlfrüchte\nKuchen","note":""},{"id":"a25","kind":"rect","type":"zone","name":"Tiefkühl-Fertiggerichte","look":"fridge","order":25,"x":0,"y":0,"w":16,"h":3,"cats":"Tiefkühlkost","items":"Fertiggerichte","note":""},{"id":"a26","kind":"rect","type":"zone","name":"Kassenzone","look":"shelf","order":26,"x":4,"y":34,"w":4,"h":18,"cats":"","items":"Zigaretten\nAufladekarten\nKaugummis\nBonbons\nSchnittblumen","note":""},{"id":"k1","kind":"rect","type":"checkout","name":"Kasse 1","x":0,"y":34,"w":4,"h":3,"cats":"","items":"","note":""},{"id":"k2","kind":"rect","type":"checkout","name":"Kasse 2","x":0,"y":39,"w":4,"h":3,"cats":"","items":"","note":""},{"id":"k3","kind":"rect","type":"checkout","name":"Kasse 3","x":0,"y":44,"w":4,"h":3,"cats":"","items":"","note":""},{"id":"k4","kind":"rect","type":"checkout","name":"Kasse 4","x":0,"y":49,"w":4,"h":3,"cats":"","items":"","note":""},{"id":"n1","kind":"callout","type":"callout","name":"Eingang fehlt noch: bitte einzeichnen","x":8,"y":64,"w":10,"h":3,"x2":2,"y2":71,"note":""}];
+  var confirmAldi = false;
+  $('aldi').addEventListener('click', function () {
+    var b = $('aldi');
+    if (!confirmAldi && state.items.length) {
+      confirmAldi = true; b.textContent = 'Aktuellen Stand ersetzen?'; b.classList.add('danger');
+      setTimeout(function () { confirmAldi = false; b.textContent = 'Aldi-Vorlage laden'; b.classList.remove('danger'); }, 3500);
+      return;
+    }
+    confirmAldi = false; b.textContent = 'Aldi-Vorlage laden'; b.classList.remove('danger');
+    state.items = JSON.parse(JSON.stringify(ALDI)); sel = null; $('banner').hidden = true;
+    renumber(); commit(); fit(); renderPanel();
+  });
+
+  /* ---------- Bedienung ---------- */
+  $('tools').addEventListener('click', function (e) { var b = e.target.closest('button'); if (b) setTool(b.dataset.tool); });
+  $('palette').addEventListener('click', function (e) { var b = e.target.closest('button'); if (b) setTool('rect', b.dataset.type); });
+  $('undo').addEventListener('click', function () { if (hidx > 0) restore(hidx - 1); });
+  $('redo').addEventListener('click', function () { if (hidx < hist.length - 1) restore(hidx + 1); });
+  $('zin').addEventListener('click', function () { var r = svg.getBoundingClientRect(); zoomAt(r.width / 2, r.height / 2, 1.25); });
+  $('zout').addEventListener('click', function () { var r = svg.getBoundingClientRect(); zoomAt(r.width / 2, r.height / 2, 0.8); });
+  $('fit').addEventListener('click', fit);
+  $('bannerClose').addEventListener('click', function () { $('banner').hidden = true; });
+  var confirmNew = false;
+  $('newplan').addEventListener('click', function () {
+    var b = $('newplan');
+    if (!confirmNew && state.items.length) {
+      confirmNew = true; b.textContent = 'Wirklich leeren?'; b.classList.add('danger');
+      setTimeout(function () { confirmNew = false; b.textContent = 'Leeres Blatt'; b.classList.remove('danger'); }, 3500);
+      return;
+    }
+    confirmNew = false; b.textContent = 'Leeres Blatt'; b.classList.remove('danger');
+    state.items = []; sel = null; view = { x: 30, y: 30, k: 1 }; $('banner').hidden = true;
+    commit(); render(); renderPanel();
+  });
+
+  document.addEventListener('keydown', function (e) {
+    var tg = e.target && e.target.tagName;
+    if (tg === 'INPUT' || tg === 'TEXTAREA' || tg === 'SELECT') return;
+    var mod = e.ctrlKey || e.metaKey, k = e.key.toLowerCase();
+    if (mod && k === 'z') { e.preventDefault(); if (e.shiftKey) { if (hidx < hist.length - 1) restore(hidx + 1); } else if (hidx > 0) restore(hidx - 1); return; }
+    if (mod && k === 'y') { e.preventDefault(); if (hidx < hist.length - 1) restore(hidx + 1); return; }
+    if (mod && k === 'd') { e.preventDefault(); duplicate(); return; }
+    if (mod) return;
+    if (k === 'delete' || k === 'backspace') { if (sel) { e.preventDefault(); removeSel(); } return; }
+    if (k === 'escape') { setTool('select'); sel = null; draft = null; render(); renderPanel(); return; }
+    if (k === 'v') setTool('select'); else if (k === 'l') setTool('line'); else if (k === 't') setTool('text'); else if (k === 'n') setTool('callout');
+    else if (k === 'r') setTool('rect', rectType);
+    var it = sel && get(sel), step = 0;
+    if (it && k.indexOf('arrow') === 0) {
+      e.preventDefault();
+      var dx = k === 'arrowleft' ? -1 : k === 'arrowright' ? 1 : 0, dy = k === 'arrowup' ? -1 : k === 'arrowdown' ? 1 : 0;
+      it.x += dx; it.y += dy; if (it.x2 != null && it.kind !== 'callout') { it.x2 += dx; it.y2 += dy; }
+      commit(); render(); syncFields();
+    }
+  });
+
+  /* ---------- Start ---------- */
+  buildPalette(); setTool('select');
+  var loaded = false;
+  try {
+    var raw = localStorage.getItem(KEY);
+    if (raw) { var d = JSON.parse(raw); if (d && Array.isArray(d.items)) { state.items = d.items; if (d.view) view = d.view; loaded = true; } }
+  } catch (e) { /* ohne gespeicherten Stand starten */ }
+  if (!loaded) {
+    state.items = sample();
+    $('bannerText').textContent = 'Beispielplan zum Ausprobieren. „Leeres Blatt“ oben rechts räumt auf.';
+    $('banner').hidden = false;
+  }
+  renumber(); commit(); render(); renderPanel();
+  if (!loaded) requestAnimationFrame(fit);
+  window.addEventListener('resize', renderHandles);
+})();
+</script>
